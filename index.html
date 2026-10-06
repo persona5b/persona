@@ -995,15 +995,22 @@ body {
     portraitFallback.style.display = '';
 
     if (isJa && revealed) {
-      /* J.A portrait only becomes visible after you have found him */
-      portraitRedacted.hidden = true;
+      /* J.A portrait only becomes visible after you have found him.
+         If ja.jpg is not yet provided, fall back to the reveal stamp so
+         the "author found" state is always visible. */
       portraitFallback.style.display = 'none';
       portraitCaption.textContent = 'SUBJECT 05 // IDENTITY CONFIRMED';
+      redactedStamp.innerHTML = 'THE AUTHOR<br>REVEALED';
       portraitImage.onload = function () {
         portraitFrame.classList.add('has-image');
         portraitImage.classList.add('loaded');
+        portraitRedacted.hidden = true;
       };
-      portraitImage.onerror = function () { portraitFrame.classList.remove('has-image'); };
+      portraitImage.onerror = function () {
+        portraitFrame.classList.remove('has-image');
+        portraitRedacted.hidden = false; /* show THE AUTHOR REVEALED stamp */
+      };
+      portraitRedacted.hidden = true; /* hidden by default; onerror may re-show */
       portraitImage.alt = 'Portrait of J.A — The Author';
       portraitImage.src = p.image;
     } else if (isJa) {
@@ -1050,10 +1057,14 @@ body {
     state.transitioning = true;
 
     var isJa = (id === 'ja');
-    Sound.click();
+    /* increment FIRST, before any sound/effect code, so the reveal
+       counter can never be skipped by a runtime error elsewhere */
     if (isJa) {
       state.jaAccess = loadJaAccess() + 1;
       saveJaAccess(state.jaAccess);
+    }
+    Sound.click();
+    if (isJa) {
       Sound.ja();                       /* special J.A sound */
       triggerEyeReveal();               /* red eye appears, blinks once */
     }
