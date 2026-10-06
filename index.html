@@ -138,6 +138,35 @@ body {
   0%, 100% { filter: drop-shadow(0 0 20px var(--accent-glow)); }
   50%      { filter: drop-shadow(0 0 45px var(--accent-glow)) drop-shadow(0 0 90px rgba(163,22,33,0.6)); }
 }
+/* single blink for the red eye when J.A is summoned */
+.eye-reveal svg { transform-origin: 50% 50%; }
+.eye-reveal.blink-once svg { animation: eyeBlink 0.55s ease-in-out 1; }
+@keyframes eyeBlink {
+  0%, 100% { transform: scaleY(1); }
+  35%      { transform: scaleY(0.06); }
+  50%      { transform: scaleY(0.06); }
+  65%      { transform: scaleY(1); }
+}
+
+/* sound toggle button */
+.sound-toggle {
+  pointer-events: all;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 38px; height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-left: 1rem;
+  transition: all 0.3s ease;
+  vertical-align: middle;
+}
+.sound-toggle:hover { color: var(--text); border-color: var(--accent); }
+.sound-toggle svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; }
+.sound-toggle.muted .sound-on { display: none; }
+.sound-toggle:not(.muted) .sound-off { display: none; }
 
 /* ---------- Header ---------- */
 .site-header {
@@ -619,8 +648,19 @@ body {
       </svg>
       PERSONA
     </div>
-    <div class="archive-meta">ARCHIVE // <span id="identityCount">05</span> IDENTITIES</div>
+    <div class="archive-meta">
+      ARCHIVE // <span id="identityCount">05</span> IDENTITIES
+      <button class="sound-toggle" id="soundToggle" aria-label="Toggle sound">
+        <svg class="sound-on" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"/></svg>
+        <svg class="sound-off" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>
+      </button>
+    </div>
   </header>
+
+  <!-- Audio assets — replace these files with your own. Keep the same filenames. -->
+  <audio id="bgm" loop preload="auto" src="assets/audio/ambient.mp3"></audio>
+  <audio id="sfxClick" preload="auto" src="assets/audio/click.mp3"></audio>
+  <audio id="sfxJa" preload="auto" src="assets/audio/ja_glitch.mp3"></audio>
 
   <!-- ============== HOME / ARCHIVE VIEW ============== -->
   <main id="homeView" class="view home-view">
@@ -782,7 +822,7 @@ body {
       status: 'UNKNOWN', designation: 'REDACTED', personality: 'UNKNOWN',
       about: 'No complete record exists.\nNo confirmed personality.\nNo verified history.\n\nEvery attempt to access this identity returns the same result.',
       traits: ['REDACTED', 'REDACTED', 'REDACTED'],
-      image: null, caption: 'SUBJECT - // OUTSIDE THE SYSTEM'
+      image: 'ja.jpg', caption: 'SUBJECT - // OUTSIDE THE SYSTEM'
     }
   };
 
@@ -809,6 +849,57 @@ body {
 
   /* -------------------- STATE -------------------- */
   var state = { view: 'home', transitioning: false, currentPersona: null, jaAccess: 0 };
+
+  /* -------------------- SOUND MANAGER --------------------
+     Place your own audio files in assets/audio/ with these names:
+       ambient.mp3  (looping background)
+       click.mp3    (soft UI click / hover)
+       ja_glitch.mp3 (played when J.A is opened)
+     Missing files are silently ignored. Toggle persists. */
+  var Sound = {
+    enabled: true,
+    bgmStarted: false,
+    KEY: 'persona_sound',
+    init: function () {
+      try { this.enabled = localStorage.getItem(this.KEY) !== 'off'; } catch (e) { this.enabled = true; }
+      this.bgm = document.getElementById('bgm');
+      this.sfxClick = document.getElementById('sfxClick');
+      this.sfxJa = document.getElementById('sfxJa');
+      if (this.bgm) { this.bgm.volume = 0.4; }
+      var self = this;
+      /* browsers block autoplay — start on first user interaction */
+      var start = function () {
+        if (!self.bgmStarted) { self.bgmStarted = true; self.playBgm(); }
+        document.removeEventListener('click', start);
+        document.removeEventListener('keydown', start);
+      };
+      document.addEventListener('click', start);
+      document.addEventListener('keydown', start);
+    },
+    playBgm: function () {
+      if (!this.enabled || !this.bgm) return;
+      var p = this.bgm.play();
+      if (p && p.catch) p.catch(function () { /* autoplay blocked, will retry */ });
+    },
+    click: function () {
+      if (!this.enabled || !this.sfxClick) return;
+      try { this.sfxClick.currentTime = 0; this.sfxClick.play(); } catch (e) { /* ignore */ }
+    },
+    ja: function () {
+      if (!this.enabled || !this.sfxJa) return;
+      try { this.sfxJa.currentTime = 0; this.sfxJa.play(); } catch (e) { /* ignore */ }
+    },
+    toggle: function () {
+      this.enabled = !this.enabled;
+      try { localStorage.setItem(this.KEY, this.enabled ? 'on' : 'off'); } catch (e) { /* ignore */ }
+      if (this.bgm) {
+        if (this.enabled) { this.bgm.volume = 0.4; this.playBgm(); }
+        else { this.bgm.pause(); }
+      }
+      var btn = document.getElementById('soundToggle');
+      if (btn) btn.classList.toggle('muted', !this.enabled);
+    }
+  };
 
   /* -------------------- DOM -------------------- */
   var $ = function (id) { return document.getElementById(id); };
@@ -844,14 +935,17 @@ body {
     };
   }
 
-  /* Red eye reveal at center of group photo + image glitch */
+  /* Red eye reveal at center of group photo + image glitch + one blink */
   function triggerEyeReveal() {
+    eyeReveal.classList.remove('blink-once');
     eyeReveal.classList.add('active');
     groupImage.classList.add('glitching');
+    /* blink once shortly after the eye appears */
+    setTimeout(function () { eyeReveal.classList.add('blink-once'); }, 180);
     setTimeout(function () {
-      eyeReveal.classList.remove('active');
+      eyeReveal.classList.remove('active', 'blink-once');
       groupImage.classList.remove('glitching');
-    }, 1800);
+    }, 2000);
   }
 
   /* -------------------- RENDER -------------------- */
@@ -900,13 +994,23 @@ body {
     portraitRedacted.hidden = true;
     portraitFallback.style.display = '';
 
-    if (isJa) {
+    if (isJa && revealed) {
+      /* J.A portrait only becomes visible after you have found him */
+      portraitRedacted.hidden = true;
+      portraitFallback.style.display = 'none';
+      portraitCaption.textContent = 'SUBJECT 05 // IDENTITY CONFIRMED';
+      portraitImage.onload = function () {
+        portraitFrame.classList.add('has-image');
+        portraitImage.classList.add('loaded');
+      };
+      portraitImage.onerror = function () { portraitFrame.classList.remove('has-image'); };
+      portraitImage.alt = 'Portrait of J.A — The Author';
+      portraitImage.src = p.image;
+    } else if (isJa) {
       portraitRedacted.hidden = false;
       portraitFallback.style.display = 'none';
-      portraitCaption.textContent = revealed
-        ? 'SUBJECT 05 // IDENTITY CONFIRMED'
-        : 'SUBJECT 05 // PORTRAIT UNAVAILABLE';
-      redactedStamp.innerHTML = revealed ? 'THE AUTHOR<br>REVEALED' : 'IDENTITY<br>REDACTED';
+      portraitCaption.textContent = 'SUBJECT 05 // PORTRAIT UNAVAILABLE';
+      redactedStamp.innerHTML = 'IDENTITY<br>REDACTED';
     } else if (p.image) {
       fallbackInitials.textContent = p.name;
       portraitCaption.textContent = p.caption;
@@ -946,10 +1050,12 @@ body {
     state.transitioning = true;
 
     var isJa = (id === 'ja');
+    Sound.click();
     if (isJa) {
       state.jaAccess = loadJaAccess() + 1;
       saveJaAccess(state.jaAccess);
-      triggerEyeReveal(); /* red eye appears at center of the photo */
+      Sound.ja();                       /* special J.A sound */
+      triggerEyeReveal();               /* red eye appears, blinks once */
     }
 
     if (hotspot && groupImage) {
@@ -959,7 +1065,8 @@ body {
       groupImage.classList.add('zooming');
     }
 
-    setTimeout(function () { veil.classList.add('down'); }, isJa ? 120 : 250);
+    /* for J.A, wait until the eye has blinked once before dropping the veil */
+    setTimeout(function () { veil.classList.add('down'); }, isJa ? 900 : 250);
 
     setTimeout(function () {
       homeView.hidden = true;
@@ -973,7 +1080,7 @@ body {
         veil.classList.remove('down');
         setTimeout(function () { dossierView.classList.remove('fading'); state.transitioning = false; }, 60);
       });
-    }, 700);
+    }, isJa ? 1500 : 700);
   }
 
   function returnToArchive() {
@@ -1043,11 +1150,24 @@ body {
   }
 
   /* -------------------- INIT -------------------- */
+  function bindSound() {
+    Sound.init();
+    var btn = document.getElementById('soundToggle');
+    if (btn) {
+      btn.classList.toggle('muted', !Sound.enabled);
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        Sound.toggle();
+      });
+    }
+  }
+
   function init() {
     applyPersistentReveal();
     bindHotspots();
     bindGroupImage();
     bindReturn();
+    bindSound();
     syncViewFlag();
   }
 
